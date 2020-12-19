@@ -157,7 +157,7 @@ static esp_ble_adv_params_t adv_params = {
 #define PROFILE_A_APP_ID 0
 #define PROFILE_B_APP_ID 1
 
-static uint8_t *myDataValue = (uint8_t *)61;
+static char *myDataValue = "";
 static uint8_t myDataLen = 1;
 
 struct gatts_profile_inst
@@ -622,50 +622,51 @@ static void gatts_profile_b_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
         {
             ESP_LOGI(GATTS_TAG, "GATT_WRITE_EVT, wifi network offset:%d len %d, value :", param->write.offset, param->write.len);
             esp_log_buffer_hex(GATTS_TAG, param->write.value, param->write.len);
-            if (myDataLen == 0)
-            {
-                ESP_LOGI("FIRST", "FIRST");
-                myDataValue = calloc(myDataLen + param->write.len + 1, sizeof(char));
-                strcpy((char *)myDataValue, (char *)param->write.value);
-                myDataLen = param->write.len;
-            }
-            else
-            {
-                char *buffer;
-                asprintf(&buffer, "%s%s", (char *)myDataValue, (char *)param->write.value);
-                myDataValue = calloc(myDataLen + param->write.len + 1, sizeof(char));
-                strcpy((char *)myDataValue, (char *)buffer);
-                myDataLen += param->write.len;
-            }
 
-            char *pvalue = (char *)myDataValue;
-            char myData[myDataLen];
-            strcpy(myData, (char *)pvalue);
 
-            ESP_LOGI(GATTS_TAG, "My something: %s, %s, %d", myData, myDataValue, myDataLen);
-
+            char *buffer;
+            asprintf(&buffer, "%s%s", (char *)myDataValue, (char *)param->write.value);
+            myDataValue = calloc(myDataLen + param->write.len + 1, sizeof(char));
+            strcpy((char *)myDataValue, (char *)buffer);
+            myDataLen += param->write.len;
+            ESP_LOGI(GATTS_TAG, "GATT_WRITE_EVT, myDataValue: %s", myDataValue);
+            
             cJSON *monitor_json = cJSON_Parse((char *)myDataValue);
             if (monitor_json == NULL)
             {
-                ESP_LOGI(GATTS_TAG, "ERROR PARSING JSON");
-            }
-            else
-            {
-                myDataLen = 0;
+                if (param->write.len < 20)
+                {
+                    ESP_LOGI(GATTS_TAG, "INVALID JSON");
+                    myDataValue = ""; // Restart cause invalid json
+                    myDataLen = 0;
+                }
+            }else{
+                ESP_LOGI(GATTS_TAG, "VALID JSON");
                 const cJSON *name = NULL;
                 name = cJSON_GetObjectItemCaseSensitive(monitor_json, "wifi");
                 if (cJSON_IsString(name) && (name->valuestring != NULL))
                 {
-                    ESP_LOGI(GATTS_TAG, "Checking monitor \"%s\"\n", name->valuestring);
+                    ESP_LOGI(GATTS_TAG, "OK wifi \"%s\"\n", name->valuestring);
                     const cJSON *pass = NULL;
                     pass = cJSON_GetObjectItemCaseSensitive(monitor_json, "pass");
                     if (cJSON_IsString(pass) && (pass->valuestring != NULL))
                     {
-                        ESP_LOGI(GATTS_TAG, "Checking monitor \"%s\"\n", pass->valuestring);
-                    }
+                        ESP_LOGI(GATTS_TAG, "OK pass \"%s\"\n", pass->valuestring);
 
-                    connectWifi(name->valuestring, pass->valuestring);
+                        const cJSON *postUrl = NULL;
+                        postUrl = cJSON_GetObjectItemCaseSensitive(monitor_json, "post");
+                        if (cJSON_IsString(postUrl) && (postUrl->valuestring != NULL))
+                        {
+                            ESP_LOGI(GATTS_TAG, "OK postUrl \"%s\"\n", postUrl->valuestring);
+                            ESP_LOGI(GATTS_TAG, "Connect wifi");
+
+                            connectWifi(name->valuestring, pass->valuestring, postUrl->valuestring);
+                            espPost(calculateMoisture(), postUrl->valuestring);
+                        }
+                    }
                 }
+                myDataValue = ""; // Restart cause invalid json
+                myDataLen = 0;
             }
             cJSON_Delete(monitor_json);
 

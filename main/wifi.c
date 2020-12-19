@@ -9,6 +9,7 @@
 #include "nvs_flash.h"
 #include "freertos/event_groups.h"
 #include "moisture.c"
+#include "esp_sleep.h"
 
 #include "esp_http_client.h"
 
@@ -34,11 +35,11 @@ static esp_err_t event_handler(void *ctx, system_event_t *event)
 	return ESP_OK;
 }
 
-static void espPost(uint32_t value)
+static void espPost(uint32_t value, char *postUrl)
 {
 	ESP_LOGI("POSTS", "A");
 	char *telegramUrl = (char *)malloc(150 * sizeof(char));
-	sprintf(telegramUrl, "https://api.telegram.org/xxxxx/sendMessage?chat_id=xxxxx&text=Humitat:%d%%", value);
+	sprintf(telegramUrl, "%s%d%%", postUrl, value);
 	esp_http_client_config_t config = {
 		.url = telegramUrl};
 	ESP_LOGI("POSTS", "B");
@@ -72,12 +73,12 @@ static void espPost(uint32_t value)
 	}
 	nvs_close(my_handle);
 
-	uint64_t sleep1Hour = 3600000000;
+	uint64_t sleep2Hour = 3600000000 * 2;
 	//Microseconds
-	esp_deep_sleep(sleep1Hour);
+	esp_deep_sleep(sleep2Hour);
 }
 
-void connectWifi(char *ssid, char *password)
+void connectWifi(char *ssid, char *password, char *postUrl)
 {
 	uint8_t *ssidU32 = (uint8_t *)32;
 	uint8_t *passU64 = (uint8_t *)64;
@@ -116,6 +117,7 @@ void connectWifi(char *ssid, char *password)
 		printf("Updating restart counter in NVS ... ");
 		err = nvs_set_str(my_handle, "wifi_ssid", ssid);
 		err = nvs_set_str(my_handle, "wifi_passw", password);
+		err = nvs_set_str(my_handle, "post_url", postUrl);
 		printf((err != ESP_OK) ? "Failed!\n" : "Done\n");
 
 		printf("Committing updates in NVS ... ");
@@ -126,6 +128,7 @@ void connectWifi(char *ssid, char *password)
 		nvs_get_str(my_handle, "wifi_ssid", NULL, &required_size);
 		char *wifi_ssid = malloc(required_size);
 		err = nvs_get_str(my_handle, "wifi_ssid", wifi_ssid, &required_size);
+		nvs_get_str(my_handle, "wifi_passw", NULL, &required_size);
 		char *wifi_passw = malloc(required_size);
 		err = nvs_get_str(my_handle, "wifi_passw", wifi_passw, &required_size);
 		switch (err)
@@ -224,7 +227,7 @@ void initWifi()
 			printf("Done\n");
 			printf("Wifi ssid = %s\n", (char *)wifi_ssid);
 			printf("Done\n");
-
+			nvs_get_str(my_handle, "wifi_passw", NULL, &required_size);
 			char *wifi_passw = malloc(required_size);
 			err = nvs_get_str(my_handle, "wifi_passw", wifi_passw, &required_size);
 			switch (err)
@@ -232,18 +235,33 @@ void initWifi()
 			case ESP_OK:
 				printf("P-Done\n");
 				printf("P-Wifi passw = %s\n", (char *)wifi_passw);
-				connectWifi((char *)wifi_ssid, (char *)wifi_passw);
-				espPost(calculateMoisture());
-				return;
+				nvs_get_str(my_handle, "post_url", NULL, &required_size);
+				char *post_url = malloc(required_size);
+				err = nvs_get_str(my_handle, "post_url", post_url, &required_size);
+				switch (err)
+				{
+				case ESP_OK:
+					printf("P-Done\n");
+					printf("P-Post url = %s\n", (char *)post_url);
+					connectWifi((char *)wifi_ssid, (char *)wifi_passw, (char *)post_url);
+					espPost(calculateMoisture(), (char *)post_url);
+					return;
+				case ESP_ERR_NVS_NOT_FOUND:
+					printf("P⁻ The post url is not initialized yet!\n");
+					break;
+				default:
+					printf("P- Post url Error (%s) reading!\n", esp_err_to_name(err));
+				}
+				break;
 			case ESP_ERR_NVS_NOT_FOUND:
-				printf("P⁻ The value is not initialized yet!\n");
+				printf("P⁻ The wifi pass is not initialized yet!\n");
 				break;
 			default:
-				printf("P- Error (%s) reading!\n", esp_err_to_name(err));
+				printf("P- Wifi pass Error (%s) reading!\n", esp_err_to_name(err));
 			}
 			break;
 		case ESP_ERR_NVS_NOT_FOUND:
-			printf("The value is not initialized yet!\n");
+			printf("The wifi ssid is not initialized yet!\n");
 			break;
 		default:
 			printf("Error (%s) reading!\n", esp_err_to_name(err));
